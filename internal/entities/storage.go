@@ -79,7 +79,7 @@ type Interval struct {
 
 // IssueRequest параметры запроса
 type IssueRequest struct {
-	ProjectID          int64     `json:"project_id"`
+	ProjectID          int       `json:"project_id"`
 	PeriodStart        time.Time `json:"period_start"`
 	PeriodEnd          time.Time `json:"period_end"`
 	IncludeHistory     bool      `json:"include_history"`

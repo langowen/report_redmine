@@ -19,6 +19,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+const layout = "02.01.2006"
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -34,7 +36,6 @@ func main() {
 				Usage:   "Set log level (debug, info, warn, error)",
 				Aliases: []string{"level"},
 			},
-			// Флаги для DatabaseConfig
 			&cli.StringFlag{
 				Name:    "db-host",
 				Usage:   "Database host",
@@ -62,10 +63,10 @@ func main() {
 				Aliases: []string{"name"},
 			},
 			&cli.StringFlag{
-				Name:    "config-path",
-				Value:   "./config/config.yaml",
-				Usage:   "Path to config file",
-				Aliases: []string{"PATCH_CONFIG"},
+				Name:    "issues-path",
+				Value:   "",
+				Usage:   "Path to issues file",
+				Aliases: []string{"path"},
 			},
 			&cli.StringFlag{
 				Name:     "start-date",
@@ -79,10 +80,16 @@ func main() {
 				Aliases:  []string{"to"},
 				Required: true,
 			},
+			&cli.IntFlag{
+				Name:     "project",
+				Usage:    "Project ID to Redmine",
+				Value:    25,
+				Aliases:  []string{"p"},
+				Required: true,
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 
-			// Перезаписываем конфиг из CLI, если флаги указаны
 			cfg := config.MustGetConfig()
 
 			cfg.LogLevel = cmd.String("log")
@@ -102,28 +109,29 @@ func main() {
 			if dbname := cmd.String("db-name"); dbname != "" {
 				cfg.Database.DBName = dbname
 			}
-			if configPath := cmd.String("config-path"); configPath != "" {
-				cfg.PatchConfig = configPath
+			if issuesPatch := cmd.String("issues-path"); issuesPatch != "" {
+				cfg.Redmine.IssuePatch = issuesPatch
+			}
+			if projectID := cmd.Int("project"); projectID != 0 {
+				cfg.Redmine.ProjectID = projectID
 			}
 
-			// Парсим даты
 			startDateStr := cmd.String("start-date")
 			endDateStr := cmd.String("end-date")
 
-			const layout = "02.01.2006"
 			var err error
 
-			cfg.StartDate, err = time.Parse(layout, startDateStr)
+			cfg.Redmine.StartDate, err = time.Parse(layout, startDateStr)
 			if err != nil {
 				return fmt.Errorf("invalid start-date format '%s', expected DD.MM.YYYY", startDateStr)
 			}
 
-			cfg.EndDate, err = time.Parse(layout, endDateStr)
+			cfg.Redmine.EndDate, err = time.Parse(layout, endDateStr)
 			if err != nil {
 				return fmt.Errorf("invalid end-date format '%s', expected DD.MM.YYYY", endDateStr)
 			}
 
-			if cfg.StartDate.After(cfg.EndDate) {
+			if cfg.Redmine.StartDate.After(cfg.Redmine.EndDate) {
 				return fmt.Errorf("start-date cannot be after end-date")
 			}
 

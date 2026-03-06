@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"report_redmine/internal/adapter/calendar"
 	"report_redmine/internal/adapter/export/excel"
 	"report_redmine/internal/config"
@@ -31,15 +33,15 @@ func (s *Service) NewReport(ctx context.Context) error {
 	const op = "storage.NewReport"
 
 	// Устанавливаем PeriodStart и PeriodEnd из конфига с учётом начала и конца дня
-	PeriodStart := time.Date(s.cfg.StartDate.Year(), s.cfg.StartDate.Month(), s.cfg.StartDate.Day(), 0, 0, 0, 0, s.cfg.StartDate.Location())
-	PeriodEnd := time.Date(s.cfg.EndDate.Year(), s.cfg.EndDate.Month(), s.cfg.EndDate.Day(), 23, 59, 59, 0, s.cfg.EndDate.Location())
+	PeriodStart := time.Date(s.cfg.Redmine.StartDate.Year(), s.cfg.Redmine.StartDate.Month(), s.cfg.Redmine.StartDate.Day(), 0, 0, 0, 0, s.cfg.Redmine.StartDate.Location())
+	PeriodEnd := time.Date(s.cfg.Redmine.EndDate.Year(), s.cfg.Redmine.EndDate.Month(), s.cfg.Redmine.EndDate.Day(), 23, 59, 59, 0, s.cfg.Redmine.EndDate.Location())
 
 	slog.Info("Generating report",
 		slog.Time("from", PeriodStart),
 		slog.Time("to", PeriodEnd))
 
 	req := entities.IssueRequest{
-		ProjectID:          25,
+		ProjectID:          s.cfg.Redmine.ProjectID,
 		PeriodStart:        PeriodStart,
 		PeriodEnd:          PeriodEnd,
 		IncludeHistory:     true,
@@ -87,14 +89,36 @@ func (s *Service) NewReport(ctx context.Context) error {
 	default:
 	}
 
-	// Экспорт в Excel
-	outputFile := fmt.Sprintf("report_%s.xlsx", time.Now().Format("20060102_150405"))
+	// Определяем путь для сохранения файла
+	outputDir := s.cfg.Redmine.IssuePatch
+	if outputDir == "" {
+		// Если путь не задан — используем текущую директорию
+		outputDir = "."
+	}
+
+	// Обеспечиваем кроссплатформенную совместимость пути
+	outputDir = filepath.Clean(outputDir)
+
+	// Создаём имя файла
+	filename := fmt.Sprintf("report_%s.xlsx", time.Now().Format("20060102_150405"))
+
+	// Формируем полный путь
+	outputFile := filepath.Join(outputDir, filename)
+
+	// Проверяем, существует ли директория, и создаём при необходимости
+	if err = os.MkdirAll(outputDir, 0755); err != nil {
+		slog.Error("Failed to create output directory", slog.Any("error", err), slog.String("dir", outputDir))
+		return fmt.Errorf("%s: failed to create output directory: %w", op, err)
+	}
+
 	if err = s.excel.Export(issues, outputFile); err != nil {
 		slog.Error("Failed to export to Excel", slog.Any("error", err), "op", op)
 		return err
 	}
 
-	slog.Info("Report generated successfully", "file", outputFile)
+	slog.Info("Report generated successfully",
+		slog.String("file", outputFile),
+		slog.String("abs", getAbsPath(outputFile)))
 
 	return nil
 }
@@ -277,4 +301,13 @@ func (s *Service) GetDeadlines(issues []entities.Issue) error {
 	}
 
 	return nil
+}
+
+// getAbsPath пытается получить абсолютный путь, игнорируя ошибку
+func getAbsPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
 }

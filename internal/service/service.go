@@ -124,7 +124,7 @@ func (s *Service) NewReport(ctx context.Context) error {
 }
 
 func (s *Service) calcSLA(issues []entities.Issue) error {
-	for i := 0; i < len(issues); i++ {
+	for i := range issues {
 		if len(issues[i].StatusHistory) == 0 {
 			continue
 		}
@@ -251,7 +251,7 @@ func (s *Service) GetDeadlines(issues []entities.Issue) error {
 		return nil
 	}
 
-	for i := 0; i < len(issues); i++ {
+	for i := range issues {
 		if issues[i].SubprojectSBS == nil {
 			continue
 		}

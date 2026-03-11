@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"report_redmine/internal/entities"
 	"strconv"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -47,7 +48,7 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 	// Заголовки
 	headers := []string{
 		"№ задачи", "Трекер", "Тема", "Приоритет", "Статус", "Дата создания",
-		"Дата решения", "SLA (часы)", "Проект SBS", "Ссылка Jira", "Команда SBS",
+		"Дата решения", "SLA (часы)", "Проект СБС", "Ссылка Jira", "Команда СБС",
 		"SLA по договору (часы)", "Нарушение SLA (часы)",
 	}
 
@@ -115,8 +116,14 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 		_ = f.SetCellStyle(sheetName, cellJ, cellJ, linkStyle)
 
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("K%d", row), valueOrEmpty(issue.SBSTeams))
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("L%d", row), issue.DeadlineSLA)
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("M%d", row), issue.MissingSLA)
+		if strings.Contains(strings.ToLower(valueOrEmpty(issue.SubprojectSBS)), "авто") &&
+			strings.Contains(strings.ToLower(issue.Priority), "третий") {
+			_ = f.SetCellValue(sheetName, fmt.Sprintf("L%d", row), "По договоренности")
+			_ = f.SetCellValue(sheetName, fmt.Sprintf("M%d", row), 0)
+		} else {
+			_ = f.SetCellValue(sheetName, fmt.Sprintf("L%d", row), issue.DeadlineSLA)
+			_ = f.SetCellValue(sheetName, fmt.Sprintf("M%d", row), issue.MissingSLA)
+		}
 	}
 
 	// Автоподбор ширины столбцов

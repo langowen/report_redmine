@@ -81,11 +81,10 @@ func main() {
 				Required: true,
 			},
 			&cli.IntFlag{
-				Name:     "project",
-				Usage:    "Project ID to Redmine",
-				Value:    25,
-				Aliases:  []string{"p"},
-				Required: true,
+				Name:    "project",
+				Usage:   "Project ID to Redmine",
+				Value:   25,
+				Aliases: []string{"p"},
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

@@ -147,14 +147,18 @@ func (s *Storage) getBasicIssues(ctx context.Context, req entities.IssueRequest)
   			  AND cv110.custom_field_id = 110
 
 		WHERE i.project_id = $1
-		  AND (
-			  (i.created_on < $2 AND i.closed_on IS NULL)
-			  OR (i.created_on < $2 AND i.closed_on BETWEEN $2 AND $3)
-			  OR (i.created_on BETWEEN $2 AND $3)
-		  )
+		  AND i.created_on BETWEEN $2 AND $3
+		
 		ORDER BY i.id
 	`
-
+	/*
+	   TODO исправили условие попадания в отчет, старое WHERE i.project_id = $1
+	         AND (
+	             (i.created_on < $2 AND i.closed_on IS NULL)
+	             OR (i.created_on < $2 AND i.closed_on BETWEEN $2 AND $3)
+	             OR (i.created_on BETWEEN $2 AND $3)
+	         )
+	*/
 	rows, err := s.db.Query(ctx, query, req.ProjectID, req.PeriodStart, req.PeriodEnd)
 	if err != nil {
 		return nil, fmt.Errorf("%s: query failed: %w", op, err)

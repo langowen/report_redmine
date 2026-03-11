@@ -135,7 +135,9 @@ func (s *Service) calcSLA(issues []entities.Issue) error {
 			}
 
 			if issues[i].StatusHistory[j].PropertyKey == "status_id" {
-
+				if issues[i].SubprojectSBS == nil {
+					continue
+				}
 				switch issues[i].StatusHistory[j].OldValueName {
 				case "Новая", "В работе":
 					if issues[i].Priority == "Нулевой приоритет" || (issues[i].Priority == "Первый приоритет" && *issues[i].SubprojectSBS == "ССО") {

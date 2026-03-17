@@ -4,15 +4,18 @@ import "time"
 
 // StatusChange представляет изменение статуса задачи
 type StatusChange struct {
-	JournalID    int64     `json:"journal_id"`
-	ChangeDate   time.Time `json:"change_date"`
-	UserID       int64     `json:"user_id"`
-	PropertyKey  string    `json:"property_key"`
-	OldValueID   *string   `json:"old_value_id"`
-	NewValueID   *string   `json:"new_value_id"`
-	OldValueName string    `json:"old_value_name"`
-	NewValueName string    `json:"new_value_name"`
-	Notes        *string   `json:"notes,omitempty"`
+	JournalID     int64     `json:"journal_id"`
+	ChangeDate    time.Time `json:"change_date"`
+	UserID        int64     `json:"user_id"`
+	UserLogin     string    `json:"user_login"`
+	UserFirstname string    `json:"user_firstname"`
+	UserLastname  string    `json:"user_lastname"`
+	PropertyKey   string    `json:"property_key"`
+	OldValueID    string    `json:"old_value_id"`
+	NewValueID    string    `json:"new_value_id"`
+	OldValueName  string    `json:"old_value_name"`
+	NewValueName  string    `json:"new_value_name"`
+	Notes         string    `json:"notes,omitempty"`
 }
 
 // TimeEntry представляет трудозатраты
@@ -54,16 +57,21 @@ type Issue struct {
 	TimeEntries   []TimeEntry    `json:"time_entries,omitempty"`
 
 	// Вычисляемые поля (будут заполнены в Go)
-	SLA             float64    `json:"sla"`
-	ResolvedDate    time.Time  `json:"resolved_date"`
-	StatusIntervals []Interval `json:"status_ntervals,omitempty"`
-	DeadlineSLA     float64    `json:"deadline_sla"`
-	MissingSLA      float64    `json:"missing_sla"`
+	SLA              float64    `json:"sla"`
+	ResolvedDate     time.Time  `json:"resolved_date"`
+	StatusIntervals  []Interval `json:"status_intervals,omitempty"`
+	DeadlineSLA      float64    `json:"deadline_sla"`
+	MissingSLA       float64    `json:"missing_sla"`
+	LastCommentator  string     `json:"last_commentator"`
+	LastComment      string     `json:"last_comment"`
+	ModificationDate time.Time  `json:"modification_date"`
+	PreviousStatus   string     `json:"previous_status"`
+	PreviousPriority string     `json:"previous_priority"`
 
 	// Кастомные поля
-	SubprojectSBS *string `json:"subproject_sbs,omitempty"`
-	URLJiraSBS    *string `json:"url_jira_sbs,omitempty"`
-	SBSTeams      *string `json:"sbs_teams,omitempty"`
+	SubprojectSBS string `json:"subproject_sbs,omitempty"`
+	URLJiraSBS    string `json:"url_jira_sbs,omitempty"`
+	SBSTeams      string `json:"sbs_teams,omitempty"`
 }
 
 // Interval представляет временной интервал между статусами

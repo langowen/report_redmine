@@ -6,10 +6,13 @@ import (
 	"log/slog"
 	"report_redmine/internal/config"
 	"report_redmine/internal/entities"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const maxWorkers = 20
 
 type Storage struct {
 	db  *pgxpool.Pool
@@ -65,28 +68,50 @@ func InitStorage(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error)
 // GetRawIssues возвращает сырые данные задач без расчетов
 func (s *Storage) GetRawIssues(ctx context.Context, req entities.IssueRequest) ([]entities.Issue, error) {
 	const op = "storage.GetRawIssues"
-
+	startTime := time.Now()
 	// 1. Получаем основные данные задач
 	issues, err := s.getBasicIssues(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
+	basInfoDuration := time.Since(startTime)
+	slog.Debug("GetRawIssues took", "seconds", basInfoDuration.Seconds())
+
 	// 2. Если нужно, получаем историю статусов для каждой задачи
+	startTime = time.Now()
+
 	if req.IncludeHistory {
+
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+
 		for i := range issues {
-			statusHistory, err := s.getStatusHistory(ctx, issues[i].TaskNumber)
-			if err != nil {
-				slog.Warn("Failed to get status history",
-					"task_id", issues[i].TaskNumber,
-					"error", err)
-				continue
-			}
-			issues[i].StatusHistory = statusHistory
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				statusHistory, err := s.getStatusHistory(ctx, issues[idx].TaskNumber)
+				if err != nil {
+					slog.Warn("Failed to get status history",
+						"task_id", issues[idx].TaskNumber,
+						"error", err)
+					return
+				}
+				issues[idx].StatusHistory = statusHistory
+			}(i)
 		}
+
+		wg.Wait()
 	}
 
+	historyDuraction := time.Since(startTime)
+	slog.Debug("Get history duration", "seconds", historyDuraction.Seconds())
+
 	// 3. Если нужно, получаем трудозатраты
+	startTime = time.Now()
 	if req.IncludeTimeEntries {
 		for i := range issues {
 			timeEntries, err := s.getTimeEntries(ctx, issues[i].TaskNumber)
@@ -99,6 +124,8 @@ func (s *Storage) GetRawIssues(ctx context.Context, req entities.IssueRequest) (
 			issues[i].TimeEntries = timeEntries
 		}
 	}
+	timeEntryDuration := time.Since(startTime)
+	slog.Debug("Get time works", "seconds", timeEntryDuration.Seconds())
 
 	slog.Info("Raw issues fetched",
 		"count", len(issues),
@@ -127,9 +154,9 @@ func (s *Storage) getBasicIssues(ctx context.Context, req entities.IssueRequest)
 			i.status_id AS current_status_id,
 			i.priority_id,
 		
-			cv39.value AS subproject_sbs,
-    		cv73.value AS url_jira_sbs,
-			cv110.value AS sbs_teams
+			COALESCE(cv39.value, '') AS subproject_sbs,
+    		COALESCE(cv73.value, '') AS url_jira_sbs,
+			COALESCE(cv110.value, '') AS sbs_teams
 			
 		FROM issues i
 		JOIN trackers t ON i.tracker_id = t.id
@@ -147,18 +174,15 @@ func (s *Storage) getBasicIssues(ctx context.Context, req entities.IssueRequest)
   			  AND cv110.custom_field_id = 110
 
 		WHERE i.project_id = $1
-		  AND i.created_on BETWEEN $2 AND $3
-		
-		ORDER BY i.id
-	`
-	/*
-	   TODO исправили условие попадания в отчет, старое WHERE i.project_id = $1
-	         AND (
+		  AND (
 	             (i.created_on < $2 AND i.closed_on IS NULL)
 	             OR (i.created_on < $2 AND i.closed_on BETWEEN $2 AND $3)
 	             OR (i.created_on BETWEEN $2 AND $3)
 	         )
-	*/
+		
+		ORDER BY i.id
+	`
+
 	rows, err := s.db.Query(ctx, query, req.ProjectID, req.PeriodStart, req.PeriodEnd)
 	if err != nil {
 		return nil, fmt.Errorf("%s: query failed: %w", op, err)
@@ -170,7 +194,7 @@ func (s *Storage) getBasicIssues(ctx context.Context, req entities.IssueRequest)
 	for rows.Next() {
 		issue := entities.Issue{}
 
-		err := rows.Scan(
+		err = rows.Scan(
 			&issue.TaskNumber,
 			&issue.Tracker,
 			&issue.Theme,
@@ -204,39 +228,33 @@ func (s *Storage) getStatusHistory(ctx context.Context, taskID int) ([]entities.
 	query := `
 SELECT
     j.id AS journal_id,
-    j.created_on AS created_date,
-    j.user_id,
-    jd.prop_key,
-    jd.old_value,
-    jd.value AS new_value,
-
-    -- Только для статусов и приоритетов
-    CASE
-        WHEN jd.prop_key = 'status_id' THEN old_status.name
-        WHEN jd.prop_key = 'priority_id' THEN old_priority.name
-        END AS old_value_name,
-
-    CASE
-        WHEN jd.prop_key = 'status_id' THEN new_status.name
-        WHEN jd.prop_key = 'priority_id' THEN new_priority.name
-        END AS new_value_name,
-
-    j.notes
+    j.created_on AS change_date,
+    u.id as author_id ,
+    u.login AS author_login,
+    u.firstname AS author_firstname,
+    u.lastname AS author_lastname,
+    COALESCE(jd.prop_key, ''),
+    COALESCE(jd.old_value, '') AS old_value_raw,
+    COALESCE(jd.value, '') AS new_value_raw,
+    COALESCE(old_status.name, old_priority.name, '') AS old_name,
+    COALESCE(new_status.name, new_priority.name, '') AS new_name,
+    COALESCE(j.notes, '') AS comment
 
 FROM journals j
-         JOIN journal_details jd ON j.id = jd.journal_id
-
+         LEFT JOIN users u ON j.user_id = u.id
+         LEFT JOIN journal_details jd ON j.id = jd.journal_id
+    -- Статусы
          LEFT JOIN issue_statuses old_status ON jd.prop_key = 'status_id' AND jd.old_value = old_status.id::text
          LEFT JOIN issue_statuses new_status ON jd.prop_key = 'status_id' AND jd.value = new_status.id::text
-
+    -- Приоритеты
          LEFT JOIN enumerations old_priority ON jd.prop_key = 'priority_id' AND jd.old_value = old_priority.id::text
          LEFT JOIN enumerations new_priority ON jd.prop_key = 'priority_id' AND jd.value = new_priority.id::text
 
 WHERE j.journalized_id = $1
   AND j.private_notes = false
-  -- Только статусы и приоритеты
-  AND jd.prop_key IN ('status_id', 'priority_id')
-ORDER BY j.created_on;
+  AND (jd.prop_key != 'assigned_to_id' OR jd.prop_key IS NULL)
+
+ORDER BY j.created_on, j.id;
 	`
 
 	rows, err := s.db.Query(ctx, query, taskID)
@@ -250,10 +268,13 @@ ORDER BY j.created_on;
 	for rows.Next() {
 		change := entities.StatusChange{}
 
-		err := rows.Scan(
+		err = rows.Scan(
 			&change.JournalID,
 			&change.ChangeDate,
 			&change.UserID,
+			&change.UserLogin,
+			&change.UserFirstname,
+			&change.UserLastname,
 			&change.PropertyKey,
 			&change.OldValueID,
 			&change.NewValueID,
@@ -299,7 +320,7 @@ func (s *Storage) getTimeEntries(ctx context.Context, taskID int) ([]entities.Ti
 	for rows.Next() {
 		entry := entities.TimeEntry{}
 
-		err := rows.Scan(
+		err = rows.Scan(
 			&entry.ID,
 			&entry.Hours,
 			&entry.SpentOn,

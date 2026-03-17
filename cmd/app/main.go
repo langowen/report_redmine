@@ -144,7 +144,10 @@ func main() {
 
 	cfg := config.MustGetConfig()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLogLevel(cfg.LogLevel)}))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: parseLogLevel(cfg.LogLevel),
+		//AddSource: true,
+	}))
 	slog.SetDefault(logger)
 
 	pgPool, err := postgres.InitStorage(ctx, cfg)

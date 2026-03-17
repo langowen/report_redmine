@@ -33,10 +33,12 @@ type DatabaseConfig struct {
 }
 
 type Redmine struct {
-	ProjectID  int       `yaml:"project_id" env:"PROJECT_ID" env-default:"25"`
-	StartDate  time.Time `ignored:"true"`
-	EndDate    time.Time `ignored:"true"`
-	IssuePatch string    `yaml:"issue_patch" env:"ISSUE_PATCH" env-default:""`
+	ProjectID          int       `yaml:"project_id" env:"PROJECT_ID" env-default:"25"`
+	StartDate          time.Time `ignored:"true"`
+	EndDate            time.Time `ignored:"true"`
+	IssuePatch         string    `yaml:"issue_patch" env:"ISSUE_PATCH" env-default:""`
+	IncludeHistory     bool      `yaml:"include_history" env-default:"true"`
+	IncludeTimeEntries bool      `yaml:"include_time_entries" env-default:"false"`
 }
 
 var (

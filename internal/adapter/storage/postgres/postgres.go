@@ -76,7 +76,7 @@ func (s *Storage) GetRawIssues(ctx context.Context, req entities.IssueRequest) (
 	}
 
 	basInfoDuration := time.Since(startTime)
-	slog.Debug("GetRawIssues took", "seconds", basInfoDuration.Seconds())
+	slog.Debug("GetRawIssues took", "seconds", basInfoDuration.String())
 
 	// 2. Если нужно, получаем историю статусов для каждой задачи
 	startTime = time.Now()
@@ -108,7 +108,7 @@ func (s *Storage) GetRawIssues(ctx context.Context, req entities.IssueRequest) (
 	}
 
 	historyDuraction := time.Since(startTime)
-	slog.Debug("Get history duration", "seconds", historyDuraction.Seconds())
+	slog.Debug("Get history duration", "seconds", historyDuraction.String())
 
 	// 3. Если нужно, получаем трудозатраты
 	startTime = time.Now()
@@ -125,7 +125,7 @@ func (s *Storage) GetRawIssues(ctx context.Context, req entities.IssueRequest) (
 		}
 	}
 	timeEntryDuration := time.Since(startTime)
-	slog.Debug("Get time works", "seconds", timeEntryDuration.Seconds())
+	slog.Debug("Get time works", "seconds", timeEntryDuration.String())
 
 	slog.Info("Raw issues fetched",
 		"count", len(issues),
@@ -173,7 +173,7 @@ func (s *Storage) getBasicIssues(ctx context.Context, req entities.IssueRequest)
   			  AND cv110.customized_type = 'Issue'
   			  AND cv110.custom_field_id = 110
 
-		WHERE i.project_id = $1
+		WHERE i.project_id = ANY($1)
 		  AND (
 	             (i.created_on < $2 AND i.closed_on IS NULL)
 	             OR (i.created_on < $2 AND i.closed_on BETWEEN $2 AND $3)

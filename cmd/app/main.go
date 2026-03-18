@@ -37,9 +37,10 @@ func main() {
 				Aliases: []string{"level"},
 			},
 			&cli.StringFlag{
-				Name:    "db-host",
-				Usage:   "Database host",
-				Aliases: []string{"host"},
+				Name:     "db-host",
+				Usage:    "Database host",
+				Aliases:  []string{"host"},
+				Required: true,
 			},
 			&cli.IntFlag{
 				Name:    "db-port",
@@ -48,19 +49,22 @@ func main() {
 				Aliases: []string{"port"},
 			},
 			&cli.StringFlag{
-				Name:    "db-user",
-				Usage:   "Database user",
-				Aliases: []string{"user"},
+				Name:     "db-user",
+				Usage:    "Database user",
+				Aliases:  []string{"user"},
+				Required: true,
 			},
 			&cli.StringFlag{
-				Name:    "db-password",
-				Usage:   "Database password",
-				Aliases: []string{"pass"},
+				Name:     "db-password",
+				Usage:    "Database password",
+				Aliases:  []string{"pass"},
+				Required: true,
 			},
 			&cli.StringFlag{
-				Name:    "db-name",
-				Usage:   "Database name",
-				Aliases: []string{"name"},
+				Name:     "db-name",
+				Usage:    "Database name",
+				Aliases:  []string{"name"},
+				Required: true,
 			},
 			&cli.StringFlag{
 				Name:    "issues-path",
@@ -80,11 +84,17 @@ func main() {
 				Aliases:  []string{"to"},
 				Required: true,
 			},
-			&cli.IntFlag{
+			&cli.IntSliceFlag{
 				Name:    "project",
-				Usage:   "Project ID to Redmine",
-				Value:   25,
+				Usage:   "Project ID(s) in Redmine (can be specified multiple times)",
+				Value:   []int{25},
 				Aliases: []string{"p"},
+			},
+			&cli.StringFlag{
+				Name:    "type",
+				Value:   "sbs",
+				Usage:   "Project type: sbs, zetta, soglasie, ingos",
+				Aliases: []string{"t"},
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -111,7 +121,7 @@ func main() {
 			if issuesPatch := cmd.String("issues-path"); issuesPatch != "" {
 				cfg.Redmine.IssuePatch = issuesPatch
 			}
-			if projectID := cmd.Int("project"); projectID != 0 {
+			if projectID := cmd.IntSlice("project"); projectID != nil {
 				cfg.Redmine.ProjectID = projectID
 			}
 
@@ -134,6 +144,22 @@ func main() {
 				return fmt.Errorf("start-date cannot be after end-date")
 			}
 
+			projectType := cmd.String("type")
+			if projectType != "" {
+				switch projectType {
+				case "sbs":
+					cfg.Redmine.TypeProject = config.ProjectTypeSBS
+				case "zetta":
+					cfg.Redmine.TypeProject = config.ProjectTypeZetta
+				case "soglasie":
+					cfg.Redmine.TypeProject = config.ProjectTypeSoglasie
+				case "ingos":
+					cfg.Redmine.TypeProject = config.ProjectTypeIngos
+				default:
+					return fmt.Errorf("invalid project type '%s': must be one of: sbs, zetta, soglasie, ingos", projectType)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -144,10 +170,20 @@ func main() {
 
 	cfg := config.MustGetConfig()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: parseLogLevel(cfg.LogLevel),
-		//AddSource: true,
-	}))
+	var logger *slog.Logger
+
+	if cfg.LogLevel == "debug" {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     parseLogLevel(cfg.LogLevel),
+			AddSource: true,
+		}))
+	} else {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     parseLogLevel(cfg.LogLevel),
+			AddSource: false,
+		}))
+	}
+
 	slog.SetDefault(logger)
 
 	pgPool, err := postgres.InitStorage(ctx, cfg)

@@ -2,9 +2,11 @@ package excel
 
 import (
 	"fmt"
+	"report_redmine/internal/config"
 	"report_redmine/internal/entities"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -55,8 +57,8 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 		"№ задачи", "Трекер", "Тема", "Приоритет", "Статус", "Дата создания",
 		"Дата решения", "SLA (часы)", "Проект СБС", "Ссылка Jira", "Команда СБС",
 		"SLA по договору (часы)", "Нарушение SLA (часы)", "Последний комментарий",
-		"Автор последнего комментария", "Предыдущий статус", "Предыдущий приоритет",
-		"Последнее изменение",
+		"Автор последнего комментария", "Дата последнего комментария", "Предыдущий статус", "Дата изменения статуса",
+		"Предыдущий приоритет", "Дата изменения приоритета", "Дата последнего изменения",
 	}
 
 	// Записываем заголовки
@@ -112,12 +114,8 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), issue.Theme)
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), issue.Priority)
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), issue.CurrentStatus)
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), issue.CreateDate.Format(dateFormat))
-		if !issue.ResolvedDate.IsZero() {
-			_ = f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), issue.ResolvedDate.Format(dateFormat))
-		} else {
-			_ = f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), "")
-		}
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), e.formatDateOrEmpty(issue.CreateDate, dateFormat))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), e.formatDateOrEmpty(issue.ResolvedDate, dateFormat))
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("H%d", row), issue.SLA)
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("I%d", row), issue.SubprojectSBS)
 
@@ -137,9 +135,12 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("N%d", row), issue.LastComment)
 		_ = f.SetCellValue(sheetName, fmt.Sprintf("O%d", row), issue.LastCommentator)
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("P%d", row), issue.PreviousStatus)
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("Q%d", row), issue.PreviousPriority)
-		_ = f.SetCellValue(sheetName, fmt.Sprintf("R%d", row), issue.ModificationDate.Format(dateFormat))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("P%d", row), e.formatDateOrEmpty(issue.LastCommentDate, dateFormat))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("Q%d", row), issue.PreviousStatus)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("R%d", row), e.formatDateOrEmpty(issue.PreviousStatusDate, dateFormat))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("S%d", row), issue.PreviousPriority)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("T%d", row), e.formatDateOrEmpty(issue.PreviousPriorityDate, dateFormat))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("U%d", row), e.formatDateOrEmpty(issue.UpdateDate, dateFormat))
 	}
 
 	lastCol, _ := excelize.ColumnNumberToName(len(headers))
@@ -195,7 +196,7 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 		return fmt.Errorf("failed to create style: %w", err)
 	}
 
-	// Применяем стиль к столбцам H, L, M
+	// Применяем стиль для чисел с запятой как разделителем к столбцам H, L, M
 	columns := []string{"H", "L", "M"}
 	for _, col := range columns {
 		if err = f.SetColStyle(sheetName, col, floatStyle); err != nil {
@@ -212,8 +213,8 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 		return fmt.Errorf("failed to create style: %w", err)
 	}
 
-	// Применяем стиль к столбцам F, G, R
-	colum := []string{"F", "G", "R"}
+	// Применяем стиль для даты к столбцам F, G, R
+	colum := []string{"F", "G", "P", "R", "T", "U"}
 	for _, col := range colum {
 		if err = f.SetColStyle(sheetName, col, dataStyle); err != nil {
 			return fmt.Errorf("failed to set column style for %s: %w", col, err)
@@ -314,23 +315,45 @@ func (e *Exporter) Export(issues []entities.Issue, filePath string) error {
 
 	lastRow := len(issues) + 1
 	condRange := fmt.Sprintf("M2:M%d", lastRow)
-	err = f.SetConditionalFormat(sheetName, condRange, []excelize.ConditionalFormatOptions{
-		{
-			Type:     "cell",
-			Criteria: ">",
-			Value:    "0",
-			Format:   &redCondStyle,
-		},
-		{
-			Type:     "cell",
-			Criteria: "between",
-			MinValue: "-4",
-			MaxValue: "-0.1",
-			Format:   &yellowCondStyle,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set conditional format: %w", err)
+
+	if issues[0].ProjectType != config.ProjectTypeSBS {
+		err = f.SetConditionalFormat(sheetName, condRange, []excelize.ConditionalFormatOptions{
+			{
+				Type:     "cell",
+				Criteria: ">",
+				Value:    "0",
+				Format:   &redCondStyle,
+			},
+			{
+				Type:     "cell",
+				Criteria: "between",
+				MinValue: "-8",
+				MaxValue: "-0.1",
+				Format:   &yellowCondStyle,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set conditional format: %w", err)
+		}
+	} else {
+		err = f.SetConditionalFormat(sheetName, condRange, []excelize.ConditionalFormatOptions{
+			{
+				Type:     "cell",
+				Criteria: ">",
+				Value:    "0",
+				Format:   &redCondStyle,
+			},
+			{
+				Type:     "cell",
+				Criteria: "between",
+				MinValue: "-4",
+				MaxValue: "-0.1",
+				Format:   &yellowCondStyle,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set conditional format: %w", err)
+		}
 	}
 
 	// Сохраняем файл
@@ -350,7 +373,7 @@ func (e *Exporter) autoSizeColumns(f *excelize.File, sheetName string, colCount 
 			width = 40
 		case 14:
 			width = 80
-		case 4, 12, 15:
+		case 4, 12, 15, 19:
 			width = 20
 		case 9, 10, 11: // SBS поля
 			width = 25
@@ -361,4 +384,11 @@ func (e *Exporter) autoSizeColumns(f *excelize.File, sheetName string, colCount 
 		}
 	}
 	return nil
+}
+
+func (e *Exporter) formatDateOrEmpty(t time.Time, format string) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(format)
 }

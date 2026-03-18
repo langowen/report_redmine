@@ -38,17 +38,21 @@ func (s *Service) NewReport(ctx context.Context) error {
 	PeriodStart := time.Date(s.cfg.Redmine.StartDate.Year(), s.cfg.Redmine.StartDate.Month(), s.cfg.Redmine.StartDate.Day(), 0, 0, 0, 0, s.cfg.Redmine.StartDate.Location())
 	PeriodEnd := time.Date(s.cfg.Redmine.EndDate.Year(), s.cfg.Redmine.EndDate.Month(), s.cfg.Redmine.EndDate.Day(), 23, 59, 59, 0, s.cfg.Redmine.EndDate.Location())
 
-	slog.Info("Generating report",
-		slog.Time("from", PeriodStart),
-		slog.Time("to", PeriodEnd))
-
 	req := entities.IssueRequest{
 		ProjectID:          s.cfg.Redmine.ProjectID,
 		PeriodStart:        PeriodStart,
 		PeriodEnd:          PeriodEnd,
 		IncludeHistory:     s.cfg.Redmine.IncludeHistory,
 		IncludeTimeEntries: s.cfg.Redmine.IncludeTimeEntries,
+		ProjectType:        s.cfg.Redmine.TypeProject,
 	}
+
+	slog.Info("Generating report",
+		slog.Time("from", PeriodStart),
+		slog.Time("to", PeriodEnd),
+		slog.Any("project-id", s.cfg.Redmine.ProjectID),
+	)
+
 	startTime := time.Now()
 
 	issues, err := s.storage.GetRawIssues(ctx, req)
@@ -57,8 +61,15 @@ func (s *Service) NewReport(ctx context.Context) error {
 		return err
 	}
 
+	if len(issues) == 0 {
+		slog.Info("No issues found", slog.Any("issues", req))
+		return nil
+	}
+
+	issues[0].ProjectType = s.cfg.Redmine.TypeProject
+
 	dbTime := time.Since(startTime)
-	slog.Debug("Raw issues generated in ", "time", dbTime.Seconds())
+	slog.Debug("Raw issues generated in ", "time", dbTime.String())
 
 	minDate := req.PeriodStart
 	maxDate := req.PeriodEnd
@@ -83,14 +94,14 @@ func (s *Service) NewReport(ctx context.Context) error {
 	}
 
 	calcCalendarDuration := time.Since(startTime)
-	slog.Debug("Calendar load generated in ", "time", calcCalendarDuration.Seconds())
+	slog.Debug("Calendar load generated in ", "time", calcCalendarDuration.String())
 
 	startTime = time.Now()
-	if err = s.calcSLA(issues); err != nil {
+	if err = s.calculateSLA(issues); err != nil {
 		slog.Error("Failed to calculate SLA", slog.Any("error", err), "op", op)
 	}
 	callCalcDuration := time.Since(startTime)
-	slog.Debug("Calc SLA generated in ", "time", callCalcDuration.Seconds())
+	slog.Debug("Calc SLA generated in ", "time", callCalcDuration.String())
 
 	startTime = time.Now()
 
@@ -98,14 +109,14 @@ func (s *Service) NewReport(ctx context.Context) error {
 		slog.Error("Failed to get deadlines", slog.Any("error", err), "op", op)
 	}
 	deadlineDuration := time.Since(startTime)
-	slog.Debug("Deadline generated in ", "time", deadlineDuration.Seconds())
+	slog.Debug("Deadline generated in ", "time", deadlineDuration.String())
 
 	startTime = time.Now()
 	if err = s.GetFields(issues); err != nil {
 		slog.Error("Failed to get fields", slog.Any("error", err), "op", op)
 	}
 	getFieldsDuration := time.Since(startTime)
-	slog.Debug("Get Fields duration", "seconds", getFieldsDuration.Seconds())
+	slog.Debug("Get Fields duration", "seconds", getFieldsDuration.String())
 
 	select {
 	case <-ctx.Done():
@@ -150,13 +161,26 @@ func (s *Service) NewReport(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) calcSLA(issues []entities.Issue) error {
+func (s *Service) calculateSLA(issues []entities.Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+
+	switch issues[0].ProjectType {
+	case config.ProjectTypeSBS:
+		return s.calculateSLASBS(issues)
+	default:
+		return s.calculateSLADefault(issues)
+	}
+}
+
+func (s *Service) calculateSLASBS(issues []entities.Issue) error {
 	for i := range issues {
 		if len(issues[i].StatusHistory) == 0 {
 			continue
 		}
 
-		for j := 0; j < len(issues[i].StatusHistory); j++ {
+		for j := range issues[i].StatusHistory {
 			if issues[i].StatusHistory[j].PropertyKey == "status_id" && issues[i].StatusHistory[j].NewValueName == "Решена" {
 				issues[i].ResolvedDate = issues[i].StatusHistory[j].ChangeDate
 			}
@@ -167,15 +191,15 @@ func (s *Service) calcSLA(issues []entities.Issue) error {
 				case "Новая", "В работе":
 					if issues[i].Priority == "Нулевой приоритет" || (issues[i].Priority == "Первый приоритет" && issues[i].SubprojectSBS == "ССО") {
 						if j == 0 {
-							issues[i].SLA = s.calculateHoursHigh(issues[i].CreateDate, issues[i].StatusHistory[j].ChangeDate)
+							issues[i].SLA = s.calculateCalendarHours(issues[i].CreateDate, issues[i].StatusHistory[j].ChangeDate)
 						} else {
-							issues[i].SLA = issues[i].SLA + s.calculateHoursHigh(issues[i].StatusHistory[j-1].ChangeDate, issues[i].StatusHistory[j].ChangeDate)
+							issues[i].SLA = issues[i].SLA + s.calculateCalendarHours(issues[i].StatusHistory[j-1].ChangeDate, issues[i].StatusHistory[j].ChangeDate)
 						}
 					} else {
 						if j == 0 {
-							issues[i].SLA = s.calculateHoursBetween(issues[i].CreateDate, issues[i].StatusHistory[j].ChangeDate)
+							issues[i].SLA = s.calculateWorkingHours(issues[i].CreateDate, issues[i].StatusHistory[j].ChangeDate)
 						} else {
-							issues[i].SLA = issues[i].SLA + s.calculateHoursBetween(issues[i].StatusHistory[j-1].ChangeDate, issues[i].StatusHistory[j].ChangeDate)
+							issues[i].SLA = issues[i].SLA + s.calculateWorkingHours(issues[i].StatusHistory[j-1].ChangeDate, issues[i].StatusHistory[j].ChangeDate)
 						}
 					}
 
@@ -197,7 +221,46 @@ func (s *Service) calcSLA(issues []entities.Issue) error {
 	return nil
 }
 
-func (s *Service) calculateHoursBetween(start, end time.Time) float64 {
+func (s *Service) calculateSLADefault(issues []entities.Issue) error {
+	for i := range issues {
+		if len(issues[i].StatusHistory) == 0 {
+			continue
+		}
+
+		for j := range issues[i].StatusHistory {
+			if issues[i].StatusHistory[j].PropertyKey == "status_id" && issues[i].StatusHistory[j].NewValueName == "Решена" {
+				issues[i].ResolvedDate = issues[i].StatusHistory[j].ChangeDate
+			}
+
+			if issues[i].StatusHistory[j].PropertyKey == "status_id" {
+
+				switch issues[i].StatusHistory[j].OldValueName {
+				case "Новая", "В работе":
+					if j == 0 {
+						issues[i].SLA = s.calculateWorkingHours(issues[i].CreateDate, issues[i].StatusHistory[j].ChangeDate)
+					} else {
+						issues[i].SLA = issues[i].SLA + s.calculateWorkingHours(issues[i].StatusHistory[j-1].ChangeDate, issues[i].StatusHistory[j].ChangeDate)
+					}
+				case "Решена":
+					continue
+				case "Обратная связь":
+					continue
+				default:
+					continue
+				}
+			}
+
+			if issues[i].StatusHistory[j].PropertyKey == "priority_id" {
+				issues[i].SLA = 0.0
+			}
+		}
+	}
+
+	return nil
+}
+
+// Функция для расчета SLA по рабочим дням
+func (s *Service) calculateWorkingHours(start, end time.Time) float64 {
 	if start.After(end) {
 		return 0
 	}
@@ -261,8 +324,8 @@ func (s *Service) calculateHoursBetween(start, end time.Time) float64 {
 	return totalHours
 }
 
-// Простая функция для расчета часов между двумя датами
-func (s *Service) calculateHoursHigh(start, end time.Time) float64 {
+// Функция для расчета SLA по всем дням 24\7\365
+func (s *Service) calculateCalendarHours(start, end time.Time) float64 {
 
 	if start.After(end) {
 		return 0
@@ -276,10 +339,21 @@ func (s *Service) calculateHoursHigh(start, end time.Time) float64 {
 }
 
 func (s *Service) GetDeadlines(issues []entities.Issue) error {
-	if len(issues) == 0 {
-		return nil
+	switch issues[0].ProjectType {
+	case config.ProjectTypeSBS:
+		return s.GetDeadlinesSBS(issues)
+	case config.ProjectTypeIngos:
+		return s.GetDeadlinesIngos(issues)
+	case config.ProjectTypeSoglasie:
+		return s.GetDeadlinesSoglasie(issues)
+	case config.ProjectTypeZetta:
+		return s.GetDeadlinesZetta(issues)
 	}
 
+	return nil
+}
+
+func (s *Service) GetDeadlinesSBS(issues []entities.Issue) error {
 	for i := range issues {
 		switch issues[i].Priority {
 		case "Нулевой приоритет":
@@ -327,27 +401,85 @@ func (s *Service) GetDeadlines(issues []entities.Issue) error {
 
 	return nil
 }
+func (s *Service) GetDeadlinesIngos(issues []entities.Issue) error {
+	for i := range issues {
+		switch issues[i].Priority {
+		case "Нулевой приоритет":
+			issues[i].DeadlineSLA = 28
+		case "Первый приоритет":
+			issues[i].DeadlineSLA = 28
+		case "Второй приоритет":
+			issues[i].DeadlineSLA = 34
+		case "Третий приоритет":
+			issues[i].DeadlineSLA = 34
+		default:
+			continue
+		}
 
-func (s *Service) GetFields(issues []entities.Issue) error {
-	if len(issues) == 0 {
-		return nil
+		issues[i].MissingSLA = issues[i].SLA - issues[i].DeadlineSLA
 	}
 
+	return nil
+}
+func (s *Service) GetDeadlinesSoglasie(issues []entities.Issue) error {
+	for i := range issues {
+		switch issues[i].Priority {
+		case "Нулевой приоритет":
+			issues[i].DeadlineSLA = 16
+		case "Первый приоритет":
+			issues[i].DeadlineSLA = 32
+		case "Второй приоритет":
+			issues[i].DeadlineSLA = 96
+		case "Третий приоритет":
+			issues[i].DeadlineSLA = 184
+		default:
+			continue
+		}
+
+		issues[i].MissingSLA = issues[i].SLA - issues[i].DeadlineSLA
+	}
+
+	return nil
+}
+
+func (s *Service) GetDeadlinesZetta(issues []entities.Issue) error {
+	for i := range issues {
+		switch issues[i].Priority {
+		case "Нулевой приоритет":
+			issues[i].DeadlineSLA = 16
+		case "Первый приоритет":
+			issues[i].DeadlineSLA = 32
+		case "Второй приоритет":
+			issues[i].DeadlineSLA = 96
+		case "Третий приоритет":
+			issues[i].DeadlineSLA = 184
+		default:
+			continue
+		}
+
+		issues[i].MissingSLA = issues[i].SLA - issues[i].DeadlineSLA
+	}
+
+	return nil
+}
+
+func (s *Service) GetFields(issues []entities.Issue) error {
 	for i := range issues {
 		for j := range issues[i].StatusHistory {
 			if issues[i].StatusHistory[j].Notes != "" {
 				issues[i].LastComment = issues[i].StatusHistory[j].Notes
 				issues[i].LastCommentator = issues[i].StatusHistory[j].UserLastname + " " + issues[i].StatusHistory[j].UserFirstname
+				issues[i].LastCommentDate = issues[i].StatusHistory[j].ChangeDate
 			}
 
 			switch issues[i].StatusHistory[j].PropertyKey {
 			case "status_id":
 				issues[i].PreviousStatus = issues[i].StatusHistory[j].OldValueName
+				issues[i].PreviousStatusDate = issues[i].StatusHistory[j].ChangeDate
 			case "priority_id":
 				issues[i].PreviousPriority = issues[i].StatusHistory[j].OldValueName
+				issues[i].PreviousPriorityDate = issues[i].StatusHistory[j].ChangeDate
 			}
-
-			issues[i].ModificationDate = issues[i].StatusHistory[j].ChangeDate
 		}
 	}
 

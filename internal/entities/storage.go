@@ -1,6 +1,9 @@
 package entities
 
-import "time"
+import (
+	"report_redmine/internal/config"
+	"time"
+)
 
 // StatusChange представляет изменение статуса задачи
 type StatusChange struct {
@@ -50,23 +53,26 @@ type Issue struct {
 	ClosedDate *time.Time `json:"closed_date,omitempty"`
 
 	// Проект
-	ProjectID int64 `json:"projectId"`
+	ProjectID int `json:"projectId"`
 
 	// Связанные данные
 	StatusHistory []StatusChange `json:"status_history,omitempty"`
 	TimeEntries   []TimeEntry    `json:"time_entries,omitempty"`
 
 	// Вычисляемые поля (будут заполнены в Go)
-	SLA              float64    `json:"sla"`
-	ResolvedDate     time.Time  `json:"resolved_date"`
-	StatusIntervals  []Interval `json:"status_intervals,omitempty"`
-	DeadlineSLA      float64    `json:"deadline_sla"`
-	MissingSLA       float64    `json:"missing_sla"`
-	LastCommentator  string     `json:"last_commentator"`
-	LastComment      string     `json:"last_comment"`
-	ModificationDate time.Time  `json:"modification_date"`
-	PreviousStatus   string     `json:"previous_status"`
-	PreviousPriority string     `json:"previous_priority"`
+	SLA                  float64            `json:"sla"`
+	ResolvedDate         time.Time          `json:"resolved_date"`
+	StatusIntervals      []Interval         `json:"status_intervals,omitempty"`
+	DeadlineSLA          float64            `json:"deadline_sla"`
+	MissingSLA           float64            `json:"missing_sla"`
+	LastCommentator      string             `json:"last_commentator"`
+	LastComment          string             `json:"last_comment"`
+	LastCommentDate      time.Time          `json:"last_comment_date"`
+	PreviousStatus       string             `json:"previous_status"`
+	PreviousStatusDate   time.Time          `json:"previous_status_date"`
+	PreviousPriority     string             `json:"previous_priority"`
+	PreviousPriorityDate time.Time          `json:"previous_priority_date"`
+	ProjectType          config.ProjectType `json:"project_type"`
 
 	// Кастомные поля
 	SubprojectSBS string `json:"subproject_sbs,omitempty"`
@@ -87,9 +93,10 @@ type Interval struct {
 
 // IssueRequest параметры запроса
 type IssueRequest struct {
-	ProjectID          int       `json:"project_id"`
-	PeriodStart        time.Time `json:"period_start"`
-	PeriodEnd          time.Time `json:"period_end"`
-	IncludeHistory     bool      `json:"include_history"`
-	IncludeTimeEntries bool      `json:"include_time_entries"`
+	ProjectID          []int              `json:"project_id"`
+	PeriodStart        time.Time          `json:"period_start"`
+	PeriodEnd          time.Time          `json:"period_end"`
+	IncludeHistory     bool               `json:"include_history"`
+	IncludeTimeEntries bool               `json:"include_time_entries"`
+	ProjectType        config.ProjectType `json:"project_type"`
 }
